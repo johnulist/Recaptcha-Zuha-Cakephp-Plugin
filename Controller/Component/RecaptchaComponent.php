@@ -9,13 +9,16 @@
  * @license MIT License (http://www.opensource.org/licenses/mit-license.php)
  */
 
+App::uses('HttpSocket', 'Network/Http');
+
 /**
  * CakePHP Recaptcha component
  *
  * @package recaptcha
  * @subpackage recaptcha.controllers.components
  */
-class RecaptchaComponent extends Object {
+
+class RecaptchaComponent extends Component {
 
 /**
  * Name
@@ -29,7 +32,7 @@ class RecaptchaComponent extends Object {
  *
  * @var string
  */
-	public $apiUrl = 'http://api-verify.recaptcha.net/verify';
+	public $apiUrl = 'http://www.google.com/recaptcha/api/verify';
 
 /**
  * Private API Key
@@ -63,28 +66,42 @@ class RecaptchaComponent extends Object {
  * Callback
  *
  * @param object Controller object
+ * @param Array $settings
  */
 	public function initialize(Controller $controller, $settings = array()) {
+		if ($controller->name == 'CakeError') {
+			return;
+		}
 		$this->privateKey = Configure::read('Recaptcha.privateKey');
 		$this->Controller = $controller;
 
 		if (empty($this->privateKey)) {
-			throw new Exception(__d('recaptcha', "You must set your private recaptcha key using Cofigure::write('Recaptcha.privateKey', 'your-key');!", true));
+			throw new Exception(__d('recaptcha', "You must set your private recaptcha key using Configure::write('Recaptcha.privateKey', 'your-key');!", true));
 		}
 
 		$defaults = array(
 			'modelClass' => $this->Controller->modelClass,
 			'errorField' => 'recaptcha',
-			'actions' => array());
+			'actions' => array()
+		);
 
 		$this->settings = array_merge($defaults, $settings);
 		$this->actions = array_merge($this->actions, $this->settings['actions']);
-		extract($this->settings);
+		unset($this->settings['actions']);
+	}
 
+ /**
+ * Callback
+ *
+ * @param object Controller object
+ */
+	public function startup(Controller $controller) {
+		extract($this->settings);
 		if ($this->enabled == true) {
 			$this->Controller->helpers[] = 'Recaptcha.Recaptcha';
 			$this->Controller->{$modelClass}->Behaviors->attach('Recaptcha.Recaptcha', array(
-				'field' => $errorField));
+				'field' => $errorField
+			));
 
 			$this->Controller->{$modelClass}->recaptcha = true;
 			if (in_array($this->Controller->action, $this->actions)) {
@@ -94,6 +111,7 @@ class RecaptchaComponent extends Object {
 				}
 			}
 		}
+
 	}
 
 /**
@@ -105,18 +123,23 @@ class RecaptchaComponent extends Object {
  * @return boolean True if the response was correct
  */
 	public function verify() {
-		if (isset($this->Controller->params['form']['recaptcha_challenge_field']) && 
-			isset($this->Controller->params['form']['recaptcha_response_field'])) {
+		if (isset($this->Controller->request->data['recaptcha_challenge_field']) &&
+			isset($this->Controller->request->data['recaptcha_response_field'])) {
 
 			$response = $this->_getApiResponse();
 			$response = explode("\n", $response);
+
+			if (empty($response[0])) {
+				$this->error = __d('recaptcha', 'Invalid API response, please contact the site admin.', true);
+				return false;
+			}
 
 			if ($response[0] == 'true') {
 				return true;
 			}
 
 			if ($response[1] == 'incorrect-captcha-sol') {
-				$this->error = __d('recaptcha', 'Incorect captcha', true);
+				$this->error = __d('recaptcha', 'Incorrect captcha', true);
 			} else {
 				$this->error = $response[1];
 			}
@@ -131,13 +154,12 @@ class RecaptchaComponent extends Object {
  * @return string
  */
 	protected function _getApiResponse() {
-		App::import('Core', 'HttpSocket');
 		$Socket = new HttpSocket();
 		return $Socket->post($this->apiUrl, array(
 			'privatekey'=> $this->privateKey,
 			'remoteip' => env('REMOTE_ADDR'),
-			'challenge' => $this->Controller->params['form']['recaptcha_challenge_field'],
-			'response' => $this->Controller->params['form']['recaptcha_response_field']));
+			'challenge' => $this->Controller->request->data['recaptcha_challenge_field'],
+			'response' => $this->Controller->request->data['recaptcha_response_field']));
 	}
 
 }
